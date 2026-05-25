@@ -3,7 +3,8 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
+RUN npm upgrade
 
 COPY . .
 RUN npm run build
@@ -14,7 +15,8 @@ FROM node:24-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
+RUN npm upgrade
 
 COPY --from=builder /app/dist ./dist
 
