@@ -52,6 +52,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -116,8 +117,33 @@ async def lifespan(app: FastAPI):
 
     log.info("LINA Identity Service starting...")
 
-    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    cache   = aioredis.from_url(REDIS_URL, decode_responses=True)
+    # Retry the database connection with backoff — postgres may need a moment
+    # to fully accept connections even after its healthcheck passes.
+    max_attempts = 10
+    for attempt in range(1, max_attempts + 1):
+        try:
+            db_pool = await asyncpg.create_pool(
+                DATABASE_URL,
+                min_size=2,
+                max_size=10,
+                ssl=False,
+            )
+            break
+        except Exception as exc:
+            if attempt == max_attempts:
+                log.error(
+                    "LINA could not connect to PostgreSQL after %d attempts: %s",
+                    max_attempts, exc,
+                )
+                raise
+            wait = 2 ** attempt  # exponential backoff: 2, 4, 8, 16 … seconds
+            log.warning(
+                "PostgreSQL not ready (attempt %d/%d): %s — retrying in %ds…",
+                attempt, max_attempts, exc, wait,
+            )
+            await asyncio.sleep(wait)
+
+    cache     = aioredis.from_url(REDIS_URL, decode_responses=True)
     ai_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
     log.info("LINA is ready.")
