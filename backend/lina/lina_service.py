@@ -82,8 +82,10 @@ from value_engine import (
 # =============================================================================
 
 log = logging.getLogger("lina")
+log_level_name = os.getenv("LINA_LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
 logging.basicConfig(
-    level=getattr(logging, os.getenv("LINA_LOG_LEVEL", "INFO")),
+    level=log_level,
     format="%(asctime)s [%(name)s] %(levelname)s — %(message)s",
 )
 
