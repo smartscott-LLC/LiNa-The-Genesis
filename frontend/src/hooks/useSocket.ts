@@ -28,6 +28,7 @@ interface SocketStore {
   logs: LogEntry[];
   messages: ChatMessage[];
   isAIThinking: boolean;
+  lastError: string | null;
 
   connect: () => void;
   disconnect: () => void;
@@ -54,6 +55,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
   logs: [],
   messages: [],
   isAIThinking: false,
+  lastError: null,
 
   connect() {
     const existing = get().socket;
@@ -69,7 +71,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     });
 
     socket.on('connect', () => {
-      set({ status: 'connected' });
+      set({ status: 'connected', lastError: null });
       addSystemLog(set, 'Connected to CollabSmart backend');
     });
 
@@ -97,7 +99,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     });
 
     socket.on('chat:start', () => {
-      set({ isAIThinking: true });
+      set({ isAIThinking: true, lastError: null });
     });
 
     socket.on('chat:typing', (data: { text: string }) => {
@@ -122,7 +124,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     });
 
     socket.on('chat:error', (data: { error: string }) => {
-      set({ isAIThinking: false });
+      set({ isAIThinking: false, lastError: data.error || 'Unknown chat error' });
       addSystemLog(set, `Error: ${data.error}`, 'error');
     });
 
@@ -170,7 +172,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
   },
 
   clearMessages() {
-    set({ messages: [] });
+    set({ messages: [], lastError: null });
     const { socket, sessionId } = get();
     if (sessionId) {
       // Clear server-side conversation history too

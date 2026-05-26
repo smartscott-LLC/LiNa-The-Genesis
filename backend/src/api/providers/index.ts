@@ -50,7 +50,9 @@ export function getProvider(providerName: string, baseUrlOverride: string): AIPr
 
   // All other providers use the OpenAI-compatible interface
   const apiKey =
-    process.env.AI_API_KEY ??
+    (provider === 'openrouter'
+      ? process.env.OPENROUTER_API_KEY ?? process.env.AI_API_KEY
+      : process.env.AI_API_KEY) ??
     process.env.OPENAI_API_KEY ?? // legacy fallback
     '';
 

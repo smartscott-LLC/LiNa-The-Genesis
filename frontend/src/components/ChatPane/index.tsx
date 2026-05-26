@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSocketStore, ChatMessage } from '../../hooks/useSocket';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/models?max_price=0';
+const OPENROUTER_KEYS_URL = 'https://openrouter.ai/settings/keys';
 
 const MAX_TEXT_FILE_BYTES = 1024 * 1024; // 1 MB — read as utf-8 text
 const BINARY_EXTENSIONS = new Set([
@@ -81,7 +83,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 }
 
 export default function ChatPane() {
-  const { messages, isAIThinking, sendMessage, clearMessages, status } =
+  const { messages, isAIThinking, sendMessage, clearMessages, status, lastError } =
     useSocketStore();
   const [input, setInput] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -184,6 +186,38 @@ export default function ChatPane() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
+        {lastError && (
+          <div className="mb-3 rounded-lg border border-yellow-700/60 bg-yellow-950/30 px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wide text-yellow-300 font-semibold mb-1">
+              Setup Help
+            </div>
+            <div className="text-xs text-yellow-100/90 leading-relaxed">
+              Lina hit a provider/setup issue: {lastError}
+            </div>
+            <div className="text-xs text-yellow-100/90 mt-1">
+              Quick fix: verify API key, provider, model, and base URL in Settings.
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a
+                href={OPENROUTER_KEYS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] px-2 py-1 rounded border border-yellow-500/40 text-yellow-100 hover:text-white hover:border-yellow-300 transition-colors"
+              >
+                OpenRouter Keys
+              </a>
+              <a
+                href={OPENROUTER_MODELS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] px-2 py-1 rounded border border-yellow-500/40 text-yellow-100 hover:text-white hover:border-yellow-300 transition-colors"
+              >
+                Free Models
+              </a>
+            </div>
+          </div>
+        )}
+
         {messages.length === 0 && (
           <div className="text-center text-gray-600 text-sm mt-8">
             <div className="text-3xl mb-3">◈</div>
@@ -194,6 +228,38 @@ export default function ChatPane() {
               AI pair programmer in your shared workspace.
               <br />
               Ask me to build, debug, or explore together.
+            </div>
+
+            <div className="mt-5 text-left mx-auto max-w-md rounded-lg border border-sharp-border bg-sharp-surface p-3">
+              <div className="text-[11px] uppercase tracking-wide text-sharp-ai font-semibold mb-2">
+                OpenRouter Quick Start
+              </div>
+              <div className="text-xs text-gray-400 leading-relaxed">
+                New here? Start free with OpenRouter in about 2 minutes.
+              </div>
+              <ol className="mt-2 text-xs text-gray-300 list-decimal pl-4 space-y-1">
+                <li>Create an API key.</li>
+                <li>Pick a free model (for example, openrouter/owl-alpha).</li>
+                <li>Open Settings (gear icon), set Provider to OpenRouter, then save your model.</li>
+              </ol>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a
+                  href={OPENROUTER_KEYS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] px-2 py-1 rounded border border-sharp-border text-gray-300 hover:text-white hover:border-sharp-accent transition-colors"
+                >
+                  Get API Key
+                </a>
+                <a
+                  href={OPENROUTER_MODELS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] px-2 py-1 rounded border border-sharp-border text-gray-300 hover:text-white hover:border-sharp-accent transition-colors"
+                >
+                  Free Models
+                </a>
+              </div>
             </div>
           </div>
         )}
@@ -220,6 +286,8 @@ export default function ChatPane() {
           ref={fileInputRef}
           type="file"
           multiple
+          aria-label="Upload files"
+          title="Upload files"
           className="hidden"
           onChange={handleFilesSelected}
         />
@@ -229,6 +297,8 @@ export default function ChatPane() {
           // @ts-expect-error -- webkitdirectory is not in React's type defs but is widely supported
           webkitdirectory="true"
           multiple
+          aria-label="Upload folder"
+          title="Upload folder"
           className="hidden"
           onChange={handleFilesSelected}
         />
