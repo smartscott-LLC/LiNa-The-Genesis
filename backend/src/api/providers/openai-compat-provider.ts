@@ -32,12 +32,17 @@ function toOAITool(tool: NormalizedTool): OAITool {
 export class OpenAICompatProvider implements AIProvider {
   private client: OpenAI;
 
-  constructor(apiKey: string, baseURL?: string) {
+  constructor(
+    apiKey: string,
+    baseURL?: string,
+    defaultHeaders?: Record<string, string>,
+  ) {
     this.client = new OpenAI({
       // Providers like Ollama don't require a key but the SDK requires a non-empty string.
       // Using 'not-needed' avoids the misleading 'ollama' placeholder.
       apiKey: apiKey || 'not-needed',
       baseURL,
+      defaultHeaders,
     });
   }
 

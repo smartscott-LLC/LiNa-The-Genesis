@@ -56,6 +56,7 @@ export function getProvider(providerName: string, baseUrlOverride: string): AIPr
 
   const defaultBaseUrl = PROVIDER_BASE_URLS[provider] ?? '';
   const baseURL = baseUrlOverride || defaultBaseUrl;
+  const defaultHeaders: Record<string, string> = {};
 
   if (!baseURL) {
     throw new Error(
@@ -66,7 +67,14 @@ export function getProvider(providerName: string, baseUrlOverride: string): AIPr
     );
   }
 
-  return new OpenAICompatProvider(apiKey, baseURL);
+  if (provider === 'openrouter') {
+    const appUrl = process.env.OPENROUTER_SITE_URL ?? process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const appName = process.env.OPENROUTER_APP_NAME ?? 'CollabSmart';
+    defaultHeaders['HTTP-Referer'] = appUrl;
+    defaultHeaders['X-Title'] = appName;
+  }
+
+  return new OpenAICompatProvider(apiKey, baseURL, defaultHeaders);
 }
 
 export type { AIProvider, ProviderName } from './types';
