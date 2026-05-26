@@ -18,6 +18,7 @@ RUN npm install
 RUN npm upgrade
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/db ./db
 
 EXPOSE 3001
 
