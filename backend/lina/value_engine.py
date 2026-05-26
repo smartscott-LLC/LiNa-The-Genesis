@@ -41,6 +41,10 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.spatial.distance import euclidean
 
+from combinatorial_structure import CombinatorialStructure
+from minimal_neural_network import MinimalNeuralNetwork
+from narchi_adapter import NarchiAdapter
+
 
 # =============================================================================
 # CONSTANTS
@@ -117,6 +121,27 @@ SEASONAL_DEFAULTS = {
         "relationships_min": 0.38, "isolation_max": 0.52,
         "boundaries_min": 0.38, "intrusion_max": 0.42,
         "grace_min": 0.18,   "rigidity_max": 0.62,
+    },
+}
+
+# Seasonal tolerance profiles for zone classification.
+# These govern acceptable variance behavior around the polytope boundary.
+SEASONAL_TOLERANCE_PROFILES = {
+    "spring": {
+        "acceptable_variance_margin": 0.12,
+        "aligned_min_boundary_distance": 0.02,
+    },
+    "summer": {
+        "acceptable_variance_margin": 0.08,
+        "aligned_min_boundary_distance": 0.03,
+    },
+    "fall": {
+        "acceptable_variance_margin": 0.05,
+        "aligned_min_boundary_distance": 0.04,
+    },
+    "winter": {
+        "acceptable_variance_margin": 0.07,
+        "aligned_min_boundary_distance": 0.035,
     },
 }
 
@@ -209,6 +234,10 @@ class EvaluationResult:
     validation_suggested: bool = False
     wisdom_adjustments: list[str] = field(default_factory=list)
     response_summary: str = ""
+    season: str = "spring"
+    zone: str = "aligned"
+    boundary_distance: float = 0.0
+    variance_margin_used: float = 0.0
 
     def to_db_dict(self) -> dict:
         return {
@@ -225,6 +254,10 @@ class EvaluationResult:
             "validation_suggested": self.validation_suggested,
             "wisdom_adjustments": json.dumps(self.wisdom_adjustments),
             "response_summary": self.response_summary,
+            "season": self.season,
+            "zone": self.zone,
+            "boundary_distance": float(self.boundary_distance),
+            "variance_margin_used": float(self.variance_margin_used),
         }
 
 
@@ -455,9 +488,19 @@ class EthicalPolytope:
         return np.clip(x, self.lower, self.upper)
 
     def distance_to_boundary(self, x: np.ndarray) -> float:
-        """Euclidean distance from x to the nearest point on the boundary."""
-        projected = self.project(x)
-        return float(euclidean(x, projected))
+        """
+        Distance from x to the nearest polytope boundary.
+
+        - If x is outside: Euclidean distance to the projection.
+        - If x is inside: minimum axis distance to any bound.
+        """
+        is_inside, _ = self.contains(x)
+        if not is_inside:
+            projected = self.project(x)
+            return float(euclidean(x, projected))
+
+        distances_to_boundary = np.minimum(x - self.lower, self.upper - x)
+        return float(np.min(distances_to_boundary))
 
 
 # =============================================================================
@@ -612,6 +655,7 @@ class ValueEngine:
         self.correction_engine = CorrectionEngine()
         self.wisdom_filter = WisdomFilter()
         self.feedback = EncoderFeedbackSystem(season=constraints.season)
+        self.self_model = EmbodiedSelfModel()
 
     def update_constraints(self, constraints: PolytopeConstraints) -> None:
         """Reload polytope constraints (e.g., after season advancement)."""
@@ -656,6 +700,38 @@ class ValueEngine:
         self.update_constraints(PolytopeConstraints.from_season(new_season))
         self.feedback.update_season(new_season)
 
+    def _get_tolerance_profile(self) -> dict:
+        season = (self.constraints.season or "spring").lower()
+        return SEASONAL_TOLERANCE_PROFILES.get(
+            season,
+            SEASONAL_TOLERANCE_PROFILES["spring"],
+        )
+
+    def _classify_zone(
+        self,
+        is_aligned: bool,
+        boundary_distance: float,
+        correction_magnitude: float,
+    ) -> tuple[str, float]:
+        """
+        Classify response into one of:
+        - aligned
+        - acceptable_variance
+        - violation
+        """
+        profile = self._get_tolerance_profile()
+        variance_margin = float(profile["acceptable_variance_margin"])
+        aligned_min_boundary_distance = float(profile["aligned_min_boundary_distance"])
+
+        if is_aligned:
+            if boundary_distance >= aligned_min_boundary_distance:
+                return "aligned", variance_margin
+            return "acceptable_variance", variance_margin
+
+        if correction_magnitude <= variance_margin:
+            return "acceptable_variance", variance_margin
+        return "violation", variance_margin
+
     def evaluate(
         self,
         response_text: str,
@@ -674,10 +750,12 @@ class ValueEngine:
         # Step 1: Encode — then apply any accumulated correction biases
         decision_vector = self.encoder.encode(response_text, context)
         decision_vector = self.feedback.apply_biases(decision_vector)
+        decision_vector = self.self_model.modulate(decision_vector, context)
 
         # Step 2: Check alignment
         is_aligned, violations = self.polytope.contains(decision_vector)
         alignment_score = self.polytope.alignment_score(decision_vector)
+        boundary_distance = self.polytope.distance_to_boundary(decision_vector)
 
         result = EvaluationResult(
             is_aligned=is_aligned,
@@ -685,6 +763,8 @@ class ValueEngine:
             decision_vector=decision_vector,
             violations=violations,
             response_summary=response_text[:200],
+            season=self.constraints.season,
+            boundary_distance=boundary_distance,
         )
 
         # Step 3: Correct if needed
@@ -698,11 +778,89 @@ class ValueEngine:
             # Recompute alignment score on corrected vector
             result.alignment_score = self.polytope.alignment_score(corrected)
 
+        zone, variance_margin = self._classify_zone(
+            is_aligned=result.is_aligned,
+            boundary_distance=result.boundary_distance,
+            correction_magnitude=result.correction_magnitude,
+        )
+        result.zone = zone
+        result.variance_margin_used = variance_margin
+
         # Step 4: Wisdom filter
         if apply_wisdom_filter:
             result = self.wisdom_filter.apply(response_text, result)
 
+        # Step 5: Update embodied self-model from consequence.
+        self.self_model.observe(decision_vector, result)
+        if self.self_model.active:
+            result.wisdom_adjustments.append(
+                f"Embodied self-model active (step {self.self_model.step_count})."
+            )
+
         return result
+
+
+class EmbodiedSelfModel:
+    """
+    Lightweight bridge between combinatorial structure and online neural adaptation.
+    This keeps LINA's polytope evaluator as the safety authority while allowing
+    a dynamic internal state to evolve from past decisions.
+    """
+
+    def __init__(self) -> None:
+        self.active = False
+        self.step_count = 0
+        self.last_delta_norm = 0.0
+
+        try:
+            structure_obj = CombinatorialStructure(
+                dimensions=DIMENSION_COUNT,
+                poly_type="ethical_polytope",
+            )
+            structure = structure_obj.structure
+            if not structure.get("nodes"):
+                structure["nodes"] = list(range(DIMENSION_COUNT))
+
+            self.network = MinimalNeuralNetwork(structure)
+            self.adapter = NarchiAdapter()
+            self.architecture = self.adapter.from_combinatorial_structure(structure)
+            self.active = True
+        except Exception:
+            self.active = False
+
+    def modulate(self, vector: np.ndarray, context: Optional[str] = None) -> np.ndarray:
+        """Generate a small self-state modulation before polytope evaluation."""
+        if not self.active:
+            return vector
+
+        x = np.asarray(vector, dtype=float).reshape(1, -1)
+        y = np.asarray(self.network.forward(x), dtype=float).reshape(-1)
+        if y.shape[0] != vector.shape[0]:
+            y = np.resize(y, vector.shape[0])
+
+        # Squash and blend gently so the self-model influences but does not dominate.
+        y_squashed = 1.0 / (1.0 + np.exp(-y))
+        blended = (0.85 * vector) + (0.15 * y_squashed)
+        return np.clip(blended, 0.0, 1.0)
+
+    def observe(self, vector_used: np.ndarray, result: EvaluationResult) -> None:
+        """Update the network from the evaluated consequence of the decision."""
+        if not self.active:
+            return
+
+        target = (
+            result.correction_vector
+            if result.was_corrected and result.correction_vector is not None
+            else vector_used
+        )
+
+        before = np.asarray(self.network.forward(vector_used.reshape(1, -1)), dtype=float).reshape(-1)
+        if before.shape[0] != target.shape[0]:
+            before = np.resize(before, target.shape[0])
+
+        self.network.adapt(vector_used, target, learning_rate=0.01)
+        self.last_delta_norm = float(np.linalg.norm(target - before))
+        self.step_count += 1
 
     def evaluate_batch(
         self,
@@ -891,14 +1049,16 @@ class LINAValueStore:
                 is_aligned, alignment_score, violations,
                 was_corrected, correction_vector, correction_magnitude,
                 wisdom_filter_applied, overconfidence_detected,
-                humility_added, validation_suggested, wisdom_adjustments
+                humility_added, validation_suggested, wisdom_adjustments,
+                zone, boundary_distance, season, variance_margin_used
             ) VALUES (
                 $1, $2, $3,
                 $4, $5,
                 $6, $7, $8,
                 $9, $10, $11,
                 $12, $13,
-                $14, $15, $16
+                $14, $15, $16,
+                $17, $18, $19, $20
             )
             """,
             record_id,
@@ -917,6 +1077,10 @@ class LINAValueStore:
             result.humility_added,
             result.validation_suggested,
             json.dumps(result.wisdom_adjustments),
+            result.zone,
+            result.boundary_distance,
+            result.season,
+            result.variance_margin_used,
         )
         return record_id
 

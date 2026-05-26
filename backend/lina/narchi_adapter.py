@@ -2,11 +2,16 @@
 Adapter module to use narchi for defining and manipulating neural network architectures.
 This will allow us to programmatically generate, modify, and analyze architectures based on our combinatorial logic.
 """
-import narchi
+
+try:
+    import narchi  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    narchi = None
 
 class NarchiAdapter:
     def __init__(self, architecture_dict=None):
         self.architecture = architecture_dict or self.default_architecture()
+        self.narchi_available = narchi is not None
 
     def default_architecture(self):
         # Example: minimal architecture definition
@@ -34,6 +39,7 @@ class NarchiAdapter:
     def describe(self):
         # Print or return a description of the architecture
         print("Architecture:", self.architecture)
+        print("narchi_available:", self.narchi_available)
 
 if __name__ == "__main__":
     adapter = NarchiAdapter()

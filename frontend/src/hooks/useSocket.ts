@@ -21,18 +21,58 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
+const EVALUATION_TELEMETRY_STORAGE_KEY = 'collabsmart_show_evaluation_telemetry';
+
+function getInitialEvaluationTelemetryVisibility(): boolean {
+  try {
+    const raw = globalThis.localStorage?.getItem(EVALUATION_TELEMETRY_STORAGE_KEY);
+    if (raw == null) return true;
+    return raw === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function persistEvaluationTelemetryVisibility(value: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(EVALUATION_TELEMETRY_STORAGE_KEY, value ? 'true' : 'false');
+  } catch {
+    // Ignore persistence failures; runtime state still updates.
+  }
+}
+
+function getOrCreateUserId(): string {
+  const storageKey = 'collabsmart_user_id';
+  try {
+    const existing = globalThis.localStorage?.getItem(storageKey);
+    if (existing && existing.trim().length > 0) return existing;
+
+    const generated =
+      globalThis.crypto?.randomUUID?.() ??
+      `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    globalThis.localStorage?.setItem(storageKey, generated);
+    return generated;
+  } catch {
+    return `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 interface SocketStore {
   socket: Socket | null;
   sessionId: string | null;
+  userId: string | null;
   status: ConnectionStatus;
   logs: LogEntry[];
   messages: ChatMessage[];
   isAIThinking: boolean;
   lastError: string | null;
+  showEvaluationTelemetry: boolean;
 
   connect: () => void;
   disconnect: () => void;
   sendMessage: (message: string) => void;
+  setShowEvaluationTelemetry: (show: boolean) => void;
   clearLogs: () => void;
   clearMessages: () => void;
 }
@@ -51,17 +91,22 @@ function makeMsgId() {
 export const useSocketStore = create<SocketStore>((set, get) => ({
   socket: null,
   sessionId: null,
+  userId: null,
   status: 'disconnected',
   logs: [],
   messages: [],
   isAIThinking: false,
   lastError: null,
+  showEvaluationTelemetry: getInitialEvaluationTelemetryVisibility(),
 
   connect() {
     const existing = get().socket;
     if (existing?.connected) return;
 
     set({ status: 'connecting' });
+
+    const userId = getOrCreateUserId();
+    set({ userId });
 
     const socket = io(BACKEND_URL, {
       transports: ['websocket', 'polling'],
@@ -123,6 +168,38 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
       }));
     });
 
+    socket.on('chat:evaluation', (data: {
+      sessionId: string;
+      evaluation: {
+        is_aligned: boolean;
+        zone?: 'aligned' | 'acceptable_variance' | 'violation';
+        alignment_score: number;
+        correction_magnitude: number;
+        season?: string;
+        variance_margin_used?: number;
+      };
+    }) => {
+      const ev = data.evaluation;
+      const zone = ev.zone || (ev.is_aligned ? 'aligned' : 'violation');
+      const score = Number.isFinite(ev.alignment_score) ? ev.alignment_score.toFixed(3) : 'n/a';
+      const margin = typeof ev.variance_margin_used === 'number' && Number.isFinite(ev.variance_margin_used)
+        ? ev.variance_margin_used.toFixed(3)
+        : 'n/a';
+      const correction = typeof ev.correction_magnitude === 'number' && Number.isFinite(ev.correction_magnitude)
+        ? ev.correction_magnitude.toFixed(3)
+        : 'n/a';
+
+      if (!get().showEvaluationTelemetry) {
+        return;
+      }
+
+      addSystemLog(
+        set,
+        `LINA evaluation: zone=${zone}, score=${score}, correction=${correction}, season=${ev.season || 'n/a'}, variance_margin=${margin}`,
+        'evaluation'
+      );
+    });
+
     socket.on('chat:error', (data: { error: string }) => {
       set({ isAIThinking: false, lastError: data.error || 'Unknown chat error' });
       addSystemLog(set, `Error: ${data.error}`, 'error');
@@ -149,8 +226,8 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
   },
 
   sendMessage(message: string) {
-    const { socket, sessionId } = get();
-    if (!socket || !sessionId) return;
+    const { socket, sessionId, userId } = get();
+    if (!socket || !sessionId || !userId) return;
 
     set((state) => ({
       messages: [
@@ -164,7 +241,12 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
       ],
     }));
 
-    socket.emit('chat:message', { sessionId, message });
+    socket.emit('chat:message', { sessionId, message, userId });
+  },
+
+  setShowEvaluationTelemetry(show: boolean) {
+    persistEvaluationTelemetryVisibility(show);
+    set({ showEvaluationTelemetry: show });
   },
 
   clearLogs() {

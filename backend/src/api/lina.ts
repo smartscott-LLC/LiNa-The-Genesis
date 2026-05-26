@@ -29,9 +29,13 @@ export interface LINAContext {
 
 export interface LINAEvaluation {
   is_aligned: boolean;
+  zone?: 'aligned' | 'acceptable_variance' | 'violation';
   alignment_score: number;
   was_corrected: boolean;
   correction_magnitude: number;
+  boundary_distance?: number;
+  season?: string;
+  variance_margin_used?: number;
   violations: Array<{
     dimension: number;
     name: string;

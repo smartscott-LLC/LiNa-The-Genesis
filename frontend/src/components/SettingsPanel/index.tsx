@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useSocketStore } from '../../hooks/useSocket';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
@@ -105,6 +106,7 @@ function Toggle({
   return (
     <button
       type="button"
+      aria-label="toggle"
       disabled={disabled}
       onClick={() => onChange(!value)}
       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors
@@ -136,6 +138,7 @@ function TextInput({
 }) {
   return (
     <input
+      aria-label="telemetry"
       type={type}
       value={value}
       min={min}
@@ -162,6 +165,7 @@ function SelectInput({
 }) {
   return (
     <select
+      aria-label="select input"
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="
@@ -516,6 +520,8 @@ function SessionTab({
   saving: Record<string, boolean>;
   onSave: (key: string, value: string) => void;
 }) {
+  const showEvaluationTelemetry = useSocketStore((s) => s.showEvaluationTelemetry);
+  const setShowEvaluationTelemetry = useSocketStore((s) => s.setShowEvaluationTelemetry);
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loadingRec, setLoadingRec] = useState(false);
   const [replayRec, setReplayRec] = useState<RecordingDetail | null>(null);
@@ -605,6 +611,16 @@ function SessionTab({
         </div>
       ) : (
         <>
+          <SettingRow
+            label="LINA evaluation telemetry"
+            description="Show or hide Phase B evaluation lines in Live Logs (zone, score, correction, season, variance margin)."
+          >
+            <Toggle
+              value={showEvaluationTelemetry}
+              onChange={setShowEvaluationTelemetry}
+            />
+          </SettingRow>
+
           <SettingRow
             label="Session recording"
             description="Record full conversation transcripts when sessions end. Stored in PostgreSQL."

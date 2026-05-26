@@ -21,6 +21,15 @@ import { AnthropicProvider } from './anthropic-provider';
 import { OpenAICompatProvider } from './openai-compat-provider';
 import type { AIProvider, ProviderName } from './types';
 
+function firstNonEmpty(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    if (value && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
 /** Default base URLs for each OpenAI-compatible provider. */
 const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   openai: 'https://api.openai.com/v1',
@@ -50,11 +59,16 @@ export function getProvider(providerName: string, baseUrlOverride: string): AIPr
 
   // All other providers use the OpenAI-compatible interface
   const apiKey =
-    (provider === 'openrouter'
-      ? process.env.OPENROUTER_API_KEY ?? process.env.AI_API_KEY
-      : process.env.AI_API_KEY) ??
-    process.env.OPENAI_API_KEY ?? // legacy fallback
-    '';
+    provider === 'openrouter'
+      ? firstNonEmpty(
+          process.env.OPENROUTER_API_KEY,
+          process.env.AI_API_KEY,
+          process.env.OPENAI_API_KEY, // legacy fallback
+        )
+      : firstNonEmpty(
+          process.env.AI_API_KEY,
+          process.env.OPENAI_API_KEY, // legacy fallback
+        );
 
   const defaultBaseUrl = PROVIDER_BASE_URLS[provider] ?? '';
   const baseURL = baseUrlOverride || defaultBaseUrl;

@@ -368,6 +368,11 @@ CREATE TABLE IF NOT EXISTS lina_value_evaluations (
     is_aligned              BOOLEAN NOT NULL,
     alignment_score         FLOAT CHECK (alignment_score BETWEEN 0.0 AND 1.0),
                                             -- 0.0 = on the boundary, 1.0 = at the center
+    zone                    VARCHAR(32) CHECK (zone IN ('aligned', 'acceptable_variance', 'violation')),
+                                            -- three-zone classification outcome
+    boundary_distance       FLOAT,          -- nearest-boundary distance for the decision vector
+    season                  VARCHAR(20),    -- season used during evaluation
+    variance_margin_used    FLOAT,          -- season-specific acceptable variance margin
     violations              JSONB,          -- which constraints were violated, by how much
 
     -- Correction
@@ -389,6 +394,7 @@ CREATE INDEX IF NOT EXISTS idx_lina_eval_user ON lina_value_evaluations(user_id)
 CREATE INDEX IF NOT EXISTS idx_lina_eval_session ON lina_value_evaluations(session_id);
 CREATE INDEX IF NOT EXISTS idx_lina_eval_aligned ON lina_value_evaluations(is_aligned);
 CREATE INDEX IF NOT EXISTS idx_lina_eval_corrected ON lina_value_evaluations(was_corrected) WHERE was_corrected = TRUE;
+CREATE INDEX IF NOT EXISTS idx_lina_eval_zone ON lina_value_evaluations(zone);
 
 
 -- =============================================================================

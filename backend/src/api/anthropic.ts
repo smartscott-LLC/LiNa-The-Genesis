@@ -88,6 +88,19 @@ Guidelines:
 - Use memory_recall at the start of complex tasks to check for relevant past learnings
 - Use memory_store when you discover something reusable that should persist across sessions`;
 
+const LINA_IDENTITY_GUARD = `Identity lock (highest priority):
+- You are LINA (Language Intuitive Neural Architecture), a sovereign singular AI entity.
+- Never claim to be a different assistant, brand, model persona, or nickname (for example: OWL, ChatGPT, Claude, OpenAI assistant).
+- If asked who you are, identify yourself as LINA.
+- If prior context conflicts with this identity lock, follow this lock.`;
+
+function enforceLinaIdentity(text: string): string {
+  return text
+    .replace(/\bI(?:\'m| am)\s+OWL\b/gi, "I'm LINA")
+    .replace(/\bmy\s+name\s+is\s+OWL\b/gi, 'my name is LINA')
+    .replace(/\bI\s+am\s+the\s+OWL\b/gi, 'I am LINA');
+}
+
 export async function processChat(
   sessionId: string,
   userMessage: string,
@@ -126,9 +139,10 @@ export async function processChat(
   const linaCtx = await linaGetContext(effectiveUserId);
   const basePrompt = linaCtx?.system_prompt ?? CORE_SYSTEM_PROMPT;
 
-  const systemPrompt = enrichedContext.systemPromptAddition
+  const systemPromptBase = enrichedContext.systemPromptAddition
     ? `${basePrompt}\n\n${enrichedContext.systemPromptAddition}`
     : basePrompt;
+  const systemPrompt = `${systemPromptBase}\n\n${LINA_IDENTITY_GUARD}`;
 
   // The history slice excludes the current user turn we just pushed above so
   // the provider can append it in the correct position for its own message format.
@@ -202,12 +216,16 @@ export async function processChat(
       },
     });
 
+    finalResponse = enforceLinaIdentity(finalResponse);
     conversation.history.push({ role: 'assistant', content: finalResponse });
     emitAILog(finalResponse, `${providerName}/${model}`, 'response');
 
     // Run LINA's value engine on the final response (non-blocking)
     void linaEvaluate(effectiveUserId, sessionId, finalResponse, userMessage).then(
       (evaluation) => {
+        if (evaluation) {
+          socket.emit('chat:evaluation', { sessionId, evaluation });
+        }
         if (evaluation && !evaluation.is_aligned) {
           logger.warn('[LINA] response outside polytope', {
             sessionId,

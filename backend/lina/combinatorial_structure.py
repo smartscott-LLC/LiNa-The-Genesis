@@ -14,7 +14,15 @@ class CombinatorialStructure:
     def generate_structure(self):
         # Placeholder: Replace with PassageMath polyhedral generation
         # Example: structure = Polyhedron(self.poly_type, self.dimensions)
-        structure = {'type': self.poly_type, 'dimensions': self.dimensions, 'nodes': [], 'edges': []}
+        node_count = max(int(self.dimensions), 1)
+        nodes = list(range(node_count))
+        edges = [(i, i + 1) for i in range(node_count - 1)]
+        structure = {
+            'type': self.poly_type,
+            'dimensions': self.dimensions,
+            'nodes': nodes,
+            'edges': edges,
+        }
         return structure
 
     def visualize(self):

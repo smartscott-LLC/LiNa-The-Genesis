@@ -407,6 +407,7 @@ initOrchestrator(io, saveSessionRecording);
 io.on('connection', (socket) => {
   // Track userId per socket for LINA session end
   let socketUserId: string | undefined;
+  let socketSessionId: string | undefined;
 
   socket.on('chat:message', async (data: { sessionId: string; message: string; userId?: string }) => {
     const { sessionId, message, userId } = data;
@@ -414,6 +415,8 @@ io.on('connection', (socket) => {
       socket.emit('chat:error', { error: 'Missing sessionId or message' });
       return;
     }
+
+    socketSessionId = sessionId;
 
     // Wire LINA on the first message of a session
     const effectiveUserId = userId ?? sessionId;
@@ -427,7 +430,7 @@ io.on('connection', (socket) => {
 
     try {
       socket.emit('chat:start', { sessionId });
-      const response = await processChat(sessionId, message, socket, memory, userId);
+      const response = await processChat(sessionId, message, socket, memory, effectiveUserId);
       socket.emit('chat:response', { sessionId, message: response });
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : String(err);
@@ -438,11 +441,8 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     // Trigger LINA memory formation on disconnect
-    if (socketUserId) {
-      const sessionId = (socket as { sessionId?: string }).sessionId;
-      if (sessionId) {
-        void linaSessionEnd(socketUserId, sessionId);
-      }
+    if (socketUserId && socketSessionId) {
+      void linaSessionEnd(socketUserId, socketSessionId);
     }
   });
 });

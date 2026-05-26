@@ -113,6 +113,39 @@ cache: Optional[aioredis.Redis] = None
 ai_client: Optional[anthropic.AsyncAnthropic] = None
 
 
+async def ensure_phase_b_schema(pool: asyncpg.Pool) -> None:
+    """Ensure Phase B value-evaluation columns exist for live deployments."""
+    await pool.execute(
+        """
+        ALTER TABLE lina_value_evaluations
+        ADD COLUMN IF NOT EXISTS zone VARCHAR(32)
+        """
+    )
+    await pool.execute(
+        """
+        ALTER TABLE lina_value_evaluations
+        ADD COLUMN IF NOT EXISTS boundary_distance FLOAT
+        """
+    )
+    await pool.execute(
+        """
+        ALTER TABLE lina_value_evaluations
+        ADD COLUMN IF NOT EXISTS season VARCHAR(20)
+        """
+    )
+    await pool.execute(
+        """
+        ALTER TABLE lina_value_evaluations
+        ADD COLUMN IF NOT EXISTS variance_margin_used FLOAT
+        """
+    )
+    await pool.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_lina_eval_zone ON lina_value_evaluations(zone)
+        """
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db_pool, cache, ai_client
@@ -144,6 +177,10 @@ async def lifespan(app: FastAPI):
                 attempt, max_attempts, exc, wait,
             )
             await asyncio.sleep(wait)
+
+    if db_pool is None:
+        raise RuntimeError("Database pool was not initialized.")
+    await ensure_phase_b_schema(db_pool)
 
     cache     = aioredis.from_url(REDIS_URL, decode_responses=True)
     ai_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
@@ -873,9 +910,13 @@ class LINACore:
         #    Wisdom flags are passed to the caller for optional UI treatment.
         eval_summary = {
             "is_aligned":            result.is_aligned,
+            "zone":                  result.zone,
             "alignment_score":       result.alignment_score,
             "was_corrected":         result.was_corrected,
             "correction_magnitude":  result.correction_magnitude,
+            "boundary_distance":     result.boundary_distance,
+            "season":                result.season,
+            "variance_margin_used":  result.variance_margin_used,
             "wisdom_filter_applied": result.wisdom_filter_applied,
             "overconfidence":        result.overconfidence_detected,
             "humility_suggested":    result.humility_added,
@@ -892,8 +933,9 @@ class LINACore:
                 is_aligned, alignment_score, violations,
                 was_corrected, correction_magnitude,
                 wisdom_filter_applied, overconfidence_detected,
-                humility_added, validation_suggested, wisdom_adjustments
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                humility_added, validation_suggested, wisdom_adjustments,
+                zone, boundary_distance, season, variance_margin_used
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
             """,
             req.user_id, req.session_id, raw_response[:200],
             result.decision_vector.tolist(),
@@ -902,6 +944,7 @@ class LINACore:
             result.wisdom_filter_applied, result.overconfidence_detected,
             result.humility_added, result.validation_suggested,
             json.dumps(result.wisdom_adjustments),
+            result.zone, result.boundary_distance, result.season, result.variance_margin_used,
         )
 
         # 9. Store LINA's response in working memory
@@ -1212,8 +1255,9 @@ async def evaluate_response(req: EvaluateRequest):
             is_aligned, alignment_score, violations,
             was_corrected, correction_magnitude,
             wisdom_filter_applied, overconfidence_detected,
-            humility_added, validation_suggested, wisdom_adjustments
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            humility_added, validation_suggested, wisdom_adjustments,
+            zone, boundary_distance, season, variance_margin_used
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
         """,
         req.user_id, req.session_id, req.response_text[:200],
         result.decision_vector.tolist(),
@@ -1222,13 +1266,18 @@ async def evaluate_response(req: EvaluateRequest):
         result.wisdom_filter_applied, result.overconfidence_detected,
         result.humility_added, result.validation_suggested,
         json.dumps(result.wisdom_adjustments),
+        result.zone, result.boundary_distance, result.season, result.variance_margin_used,
     )
 
     return {
         "is_aligned":           result.is_aligned,
+        "zone":                 result.zone,
         "alignment_score":      result.alignment_score,
         "was_corrected":        result.was_corrected,
         "correction_magnitude": result.correction_magnitude,
+        "boundary_distance":    result.boundary_distance,
+        "season":               result.season,
+        "variance_margin_used": result.variance_margin_used,
         "violations":           result.violations,
         "wisdom": {
             "filter_applied":       result.wisdom_filter_applied,
@@ -1245,7 +1294,7 @@ async def get_alignment_summary(user_id: str, window: int = 50):
     """Get alignment rate and correction summary for a user."""
     rows = await db_pool.fetch(
         """
-        SELECT is_aligned, alignment_score, was_corrected, overconfidence_detected
+        SELECT is_aligned, alignment_score, was_corrected, overconfidence_detected, zone
         FROM lina_value_evaluations WHERE user_id = $1
         ORDER BY created_at DESC LIMIT $2
         """,
@@ -1258,11 +1307,17 @@ async def get_alignment_summary(user_id: str, window: int = 50):
     aligned = sum(1 for r in rows if r["is_aligned"])
     corrected = sum(1 for r in rows if r["was_corrected"])
     overconfident = sum(1 for r in rows if r["overconfidence_detected"])
+    zone_counts = {"aligned": 0, "acceptable_variance": 0, "violation": 0}
+    for row in rows:
+        zone = row.get("zone")
+        if zone in zone_counts:
+            zone_counts[zone] += 1
 
     return {
         "alignment_rate": aligned / total,
         "total_evaluations": total,
         "corrected": corrected,
         "overconfidence_detected": overconfident,
+        "zone_counts": zone_counts,
         "window": window,
     }
