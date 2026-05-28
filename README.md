@@ -11,6 +11,8 @@
 
 </div>
 
+> 📖 **New here?** Check out the **[Quick-Start Guide](docs/QUICK_START.md)** — get up and running with the free **Owl Alpha** model on OpenRouter in minutes.
+
 ---
 
 ## ✨ What is CollabSmart?
