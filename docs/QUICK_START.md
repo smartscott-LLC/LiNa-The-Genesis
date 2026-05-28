@@ -44,7 +44,7 @@ Compatible with Claude Code, OpenClaw, and other mainstream productivity tools.
 
 ```bash
 git clone https://github.com/smartscott-LLC/CollabSmart.git
-cd CollabSmart
+cd LiNa-The_Genesis
 ```
 
 ### 2 — Install dependencies
