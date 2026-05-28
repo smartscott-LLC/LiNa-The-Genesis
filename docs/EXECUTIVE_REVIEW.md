@@ -105,7 +105,7 @@ CollabSmart is **provider-agnostic at the language layer**.  LINA's identity and
 | OpenRouter | **Free models** | OpenAI-compatible adapter |
 | Together AI | **Free tier** | OpenAI-compatible adapter |
 
-All providers are switchable at runtime via the Settings panel — no restart, no redeployment.  The LINA Identity Service retains its own independent `LINA_MODEL` setting (defaults to `claude-sonnet-4-6`) and can be pointed at a different model than the chat provider.
+All providers are switchable at runtime via the Settings panel — no restart, no redeployment.  The LINA Identity Service retains its own independent `LINA_MODEL` setting (docker-compose default: `claude-haiku-4-5-20251001`; service code fallback: `claude-sonnet-4-6`) and can be pointed at a different model than the chat provider.
 
 ---
 

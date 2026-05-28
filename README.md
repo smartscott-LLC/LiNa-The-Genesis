@@ -236,8 +236,8 @@ cp .env.example .env
 | `FEEDBACK_COLLECTION_ENABLED` | `true` | | Accept user feedback via POST /api/feedback |
 | `LOG_LEVEL` | `info` | | Winston log level |
 | `LINA_SERVICE_URL` | `http://lina:8001` | | URL of the LINA Identity Service |
-| `LINA_MODEL` | `claude-sonnet-4-6` | | Claude model used by LINA's identity service |
-| `LINA_MAX_TOKENS` | `1024` | | Max tokens for LINA's identity service responses |
+| `LINA_MODEL` | `claude-haiku-4-5-20251001` | | Claude model used by LINA's identity service (docker-compose default; service code falls back to `claude-sonnet-4-6` if unset) |
+| `LINA_MAX_TOKENS` | `4096` | | Max tokens for LINA's identity service responses |
 
 All of these (except `ANTHROPIC_API_KEY`, `AI_API_KEY`, and the `NEXT_PUBLIC_*` vars) can also be changed at runtime via the Settings panel without restarting — the DB-backed settings cache refreshes every 60 seconds.
 
