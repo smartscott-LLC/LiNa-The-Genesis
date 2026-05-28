@@ -1,8 +1,8 @@
 # LINA Implementation Spec (Executable)
 
-Status: Draft v0.1
+Status: v1.0 — Phase A & Phase B Complete
 Owner: CollabSmart Core Team
-Date: 2026-05-25
+Date: 2026-05-28
 
 ## 1) Purpose
 This document translates the LINA vision into concrete, testable engineering requirements.
@@ -94,22 +94,25 @@ For each user_id, track:
 Promotion decision must be deterministic and explainable.
 
 ## 7) Integration Work Plan
-Phase A (current): continuity correctness
-- stable user_id propagation end-to-end
-- reliable session end memory formation
-- identity lock in user-visible output
+Phase A (complete): continuity correctness
+- ✅ stable user_id propagation end-to-end
+- ✅ reliable session end memory formation
+- ✅ identity lock in user-visible output
 
-Phase B: geometric runtime hardening
-- explicit zone classification added to evaluate output
-- season-specific tolerance profile load path
-- persisted variance metrics
+Phase B (complete): geometric runtime hardening
+- ✅ explicit zone classification added to evaluate output
+- ✅ season-specific tolerance profile load path
+- ✅ persisted variance metrics (zone, boundary_distance, season, variance_margin_used)
+- ✅ startup-safe schema migration (ensure_phase_b_schema)
+- ✅ WebSocket chat:evaluation telemetry event
+- ✅ frontend live log rendering for Phase B fields
 
-Phase C: neuro-geometry module activation
+Phase C (pending): neuro-geometry module activation
 - integrate combinatorial structure as state descriptor
 - integrate minimal neural network update path per evaluated decision
 - integrate narchi adapter for architecture/state materialization
 
-Phase D: verification and claims audit
+Phase D (pending): verification and claims audit
 - add deterministic test fixtures for known vectors
 - add contract tests for zone boundaries
 - publish claim-to-test matrix
@@ -122,8 +125,9 @@ A release is compliant when all are true:
 - DoD-4: memory formation occurs on session end and is queryable
 - DoD-5: claim-to-test matrix has no unresolved critical gaps
 
-## 9) Immediate Next Coding Tasks
-1. Add zone classification fields to /lina/evaluate response.
-2. Add seasonal tolerance config and runtime loader in value_engine.py.
-3. Persist zone metrics per evaluation row.
-4. Add regression tests for aligned/variance/violation fixtures.
+## 9) Immediate Next Coding Tasks (Phase C)
+1. Integrate `combinatorial_structure.py` as the live state descriptor per evaluated decision.
+2. Wire `minimal_neural_network.py` update path: each evaluation updates network weights.
+3. Integrate `narchi_adapter.py` for architecture / state materialization output.
+4. Add deterministic regression fixtures for aligned / acceptable_variance / violation boundary cases.
+5. Begin claim-to-test matrix to close Phase D DoD gaps.
