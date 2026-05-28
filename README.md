@@ -183,18 +183,11 @@ CollabSmart/
 │   ├── tailwind.config.js    # Custom `sharp` dark colour palette
 │   └── package.json
 │
-├── container/                # Shared Linux desktop container
-│   ├── Dockerfile            # Ubuntu 24.04 + XFCE4 + TigerVNC + noVNC + dbus
-│   ├── entrypoint.sh
-│   ├── user-setup.sh         # Creates `user` (human) + `ai-agent` Linux users
-│   └── configs/xstartup      # VNC startup config (uses dbus-launch)
-│
-└── memory/                   # Python reference implementation of the memory system
-    │                         # (TypeScript production code is in backend/src/memory/)
-    ├── memory_system/        # Core memory tier reference implementations
-    ├── agent_factory/        # Specialized agent factory schema & architecture docs
-    ├── onet_integration/     # O*NET occupation data helpers
-    └── personality/          # Collaboration mode & personality learning reference
+└── container/                # Shared Linux desktop container
+    ├── Dockerfile            # Ubuntu 24.04 + XFCE4 + TigerVNC + noVNC + dbus
+    ├── entrypoint.sh
+    ├── user-setup.sh         # Creates `user` (human) + `ai-agent` Linux users
+    └── configs/xstartup      # VNC startup config (uses dbus-launch)
 ```
 
 ---
@@ -243,7 +236,7 @@ cp .env.example .env
 | `FEEDBACK_COLLECTION_ENABLED` | `true` | | Accept user feedback via POST /api/feedback |
 | `LOG_LEVEL` | `info` | | Winston log level |
 | `LINA_SERVICE_URL` | `http://lina:8001` | | URL of the LINA Identity Service |
-| `LINA_MODEL` | `claude-haiku-4-5-20251001` | | Claude model used by LINA's identity service |
+| `LINA_MODEL` | `claude-haiku-4-5-20251001` | | Claude model used by LINA's identity service (docker-compose default; service code falls back to `claude-sonnet-4-6` if unset) |
 | `LINA_MAX_TOKENS` | `4096` | | Max tokens for LINA's identity service responses |
 
 All of these (except `ANTHROPIC_API_KEY`, `AI_API_KEY`, and the `NEXT_PUBLIC_*` vars) can also be changed at runtime via the Settings panel without restarting — the DB-backed settings cache refreshes every 60 seconds.
@@ -665,3 +658,14 @@ After ingesting, set `onet_enabled = true` in the Settings panel.
 ## 📄 License
 
 BSL — see [LICENSE](LICENSE) for details.
+
+---
+
+## 📚 Further Reading
+
+| Document | Description |
+|---|---|
+| [`docs/EXECUTIVE_REVIEW.md`](docs/EXECUTIVE_REVIEW.md) | Exhaustive executive review — architecture deep-dive and competitive differentiation |
+| [`docs/lina-implementation-spec.md`](docs/lina-implementation-spec.md) | LINA runtime implementation contract and phase status |
+| [`docs/adr/0001-lina-geometric-runtime.md`](docs/adr/0001-lina-geometric-runtime.md) | ADR: contract-driven geometric runtime |
+| [`backend/lina/LINA_SOUL.md`](backend/lina/LINA_SOUL.md) | LINA's founding document — center of truth for all identity and values design |
