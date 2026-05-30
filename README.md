@@ -106,7 +106,7 @@ All six services share a Docker named volume `workspace` mounted at `/workspace`
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/smartscott-LLC/CollabSmart.git
+git clone https://github.com/smartscott-LLC/LiNa-The-Genesis.git
 cd CollabSmart
 # 2.
 cd backend && npm install
@@ -153,7 +153,7 @@ docker compose down
 ## 🗂️ Repository Layout
 
 ```
-CollabSmart/
+LiNa-The-Genesis/
 ├── .env.example              # Template — copy to .env and fill in values
 ├── docker-compose.yml        # Orchestrates all 6 services
 ├── start.sh                  # One-shot startup script
