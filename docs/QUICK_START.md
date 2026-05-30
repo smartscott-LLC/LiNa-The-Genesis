@@ -43,7 +43,7 @@ Compatible with Claude Code, OpenClaw, and other mainstream productivity tools.
 ### 1 — Clone the repository
 
 ```bash
-git clone https://github.com/smartscott-LLC/CollabSmart.git
+git clone https://github.com/smartscott-LLC/LiNa-The-Genesis.git
 cd LiNa-The-Genesis
 ```
 
