@@ -10,7 +10,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)](https://docs.docker.com/compose/)
 
 </div>
-
+Application by smartscott.com 
 > 📖 **New here?** Check out the **[Quick-Start Guide](docs/QUICK_START.md)** — get up and running with the free **Owl Alpha** model on OpenRouter in minutes.
 
 ---
