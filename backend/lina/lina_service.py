@@ -1319,16 +1319,14 @@ async def get_identity(user_id: str):
     return dict(row)
 
 
-@app.get("/lina/context/{user_id}")
-async def get_context(user_id: str):
+@app.api_route("/lina/context/{user_id}", methods=["GET", "POST"])
+async def get_context(user_id: str, req: Optional[ContextRequest] = None):
     """
     Returns LINA's full system prompt and session context for a user.
-    Called by the CollabSmart backend before each Claude API call —
-    the backend uses this as the system prompt, then handles tools
-    and the agentic loop itself.
+    Called by the CollabSmart backend before each Claude API call.
 
-    This keeps the tool loop in the TypeScript backend while LINA
-    provides the identity, memory, and values layer.
+    Accepts an optional POST body with last_evaluation to inject
+    LINA's previous alignment results into the system prompt.
     """
     core = get_core()
     try:
@@ -1356,10 +1354,17 @@ async def get_context(user_id: str):
         }
     except Exception:
         polytope_constraints = None
+        pc = None
+
+    # Get last evaluation if provided
+    last_evaluation = None
+    if req and req.last_evaluation:
+        last_evaluation = req.last_evaluation
 
     system_prompt = core.prompt_builder.build(
         context, session_number,
         polytope_constraints=polytope_constraints,
+        last_evaluation=last_evaluation,
     )
 
     return {
@@ -1380,6 +1385,11 @@ class EvaluateRequest(BaseModel):
     session_id: str
     response_text: str
     context: Optional[str] = None
+
+
+class ContextRequest(BaseModel):
+    """Optional body for /lina/context — passes last evaluation for awareness block."""
+    last_evaluation: Optional[dict] = None
 
 
 @app.post("/lina/evaluate")

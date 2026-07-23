@@ -25,6 +25,18 @@ export interface LINAContext {
   season: string;
   relationship_depth: string;
   session_number: number;
+  polytope?: {
+    dimensions: string[];
+    season: string;
+  };
+}
+
+export interface LastEvaluation {
+  is_aligned: boolean;
+  zone?: string;
+  alignment_score: number;
+  violations: Array<{ name: string; value: number; bound: number }>;
+  wisdom_notes: string[];
 }
 
 export interface LINAEvaluation {
@@ -123,9 +135,21 @@ export async function linaSessionStart(
  * Get LINA's system prompt and context for a user.
  * Returns null on failure — caller falls back to the default system prompt.
  */
-export async function linaGetContext(userId: string): Promise<LINAContext | null> {
+export async function linaGetContext(
+  userId: string,
+  lastEvaluation?: LastEvaluation,
+): Promise<LINAContext | null> {
   try {
-    const res = await linaFetch(`/lina/context/${encodeURIComponent(userId)}`);
+    const url = `/lina/context/${encodeURIComponent(userId)}`;
+    const options: RequestInit = { method: 'GET' };
+
+    // If there's a last evaluation, POST it so the prompt builder can include it
+    if (lastEvaluation) {
+      options.method = 'POST';
+      options.body = JSON.stringify({ last_evaluation: lastEvaluation });
+    }
+
+    const res = await linaFetch(url, options);
     if (!res.ok) return null;
     return res.json() as Promise<LINAContext>;
   } catch (err) {

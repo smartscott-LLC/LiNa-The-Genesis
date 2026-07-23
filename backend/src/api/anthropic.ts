@@ -23,6 +23,13 @@ export interface ConversationSession {
   history: ChatMessage[];
   userId?: string;
   startedAt: Date;
+  lastEvaluation?: {
+    is_aligned: boolean;
+    zone?: string;
+    alignment_score: number;
+    violations: Array<{ name: string; value: number; bound: number }>;
+    wisdom_notes: string[];
+  };
 }
 
 const conversations = new Map<string, ConversationSession>();
@@ -136,7 +143,7 @@ export async function processChat(
   // Attempt to get LINA's identity-aware system prompt.
   // Falls back to the flat CORE_SYSTEM_PROMPT if LINA is unavailable.
   const effectiveUserId = userId ?? sessionId;
-  const linaCtx = await linaGetContext(effectiveUserId);
+  const linaCtx = await linaGetContext(effectiveUserId, conversation.lastEvaluation);
   const basePrompt = linaCtx?.system_prompt ?? CORE_SYSTEM_PROMPT;
 
   const systemPromptBase = enrichedContext.systemPromptAddition
@@ -220,24 +227,44 @@ export async function processChat(
     conversation.history.push({ role: 'assistant', content: finalResponse });
     emitAILog(finalResponse, `${providerName}/${model}`, 'response');
 
-    // Run LINA's value engine on the final response (non-blocking)
-    void linaEvaluate(effectiveUserId, sessionId, finalResponse, userMessage).then(
-      (evaluation) => {
-        if (evaluation) {
-          socket.emit('chat:evaluation', { sessionId, evaluation });
-        }
-        if (evaluation && !evaluation.is_aligned) {
+    // Run LINA's value engine on the final response (awaited — not fire-and-forget)
+    // The evaluation feeds back into LINA's context for the next turn.
+    try {
+      const evaluation = await linaEvaluate(effectiveUserId, sessionId, finalResponse, userMessage);
+      if (evaluation) {
+        socket.emit('chat:evaluation', { sessionId, evaluation });
+
+        if (!evaluation.is_aligned) {
           logger.warn('[LINA] response outside polytope', {
             sessionId,
             alignment_score: evaluation.alignment_score,
             violations: evaluation.violations.map((v) => v.name),
           });
         }
-        if (evaluation?.wisdom.overconfidence) {
+        if (evaluation.wisdom?.overconfidence) {
           logger.info('[LINA] overconfidence detected in response', { sessionId });
         }
-      },
-    );
+
+        // Store the evaluation in the conversation metadata so the next
+        // context fetch can include it in LINA's system prompt.
+        conversation.lastEvaluation = {
+          is_aligned: evaluation.is_aligned,
+          zone: evaluation.zone,
+          alignment_score: evaluation.alignment_score,
+          violations: evaluation.violations.slice(0, 3).map((v) => ({
+            name: v.name,
+            value: v.value,
+            bound: v.bound,
+          })),
+          wisdom_notes: evaluation.wisdom?.notes?.slice(0, 2) || [],
+        };
+      }
+    } catch (err) {
+      logger.warn('[LINA] evaluate failed (non-fatal)', {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Persist the completed interaction across all memory tiers
     await memory.storeInteraction(
