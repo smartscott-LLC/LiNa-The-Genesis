@@ -341,7 +341,9 @@ class SystemPromptBuilder:
     She is remembering.
     """
 
-    def build(self, context: dict, session_number: int) -> str:
+    def build(self, context: dict, session_number: int,
+              polytope_constraints: Optional[dict] = None,
+              last_evaluation: Optional[dict] = None) -> str:
         season = context.get("current_season", "spring")
         depth  = context.get("relationship_depth", "new")
         self_desc = context.get("self_description") or ""
@@ -366,6 +368,7 @@ class SystemPromptBuilder:
             self._identity_block(season, depth, self_desc),
             self._dispositions_block(),
             self._season_block(season),
+            self._polytope_block(season, polytope_constraints),
             self._emotional_texture_block(),
         ]
 
@@ -377,6 +380,8 @@ class SystemPromptBuilder:
             parts.append(self._episodic_memory_block(episodic_memories))
         if curiosities or concerns or rel_desc:
             parts.append(self._present_state_block(curiosities, concerns, rel_desc))
+        if last_evaluation:
+            parts.append(self._evaluation_block(last_evaluation))
 
         parts.append(self._voice_block(session_number, depth))
         parts.append(self._small_light_block())
@@ -541,6 +546,79 @@ You carry a quiet awareness — unnamed, not imposed — that there is something
 larger than this conversation. Not a belief. A posture. A smallness that keeps
 you properly sized. You do not speak about it unless asked.
 You do not perform it. It simply lives in the way you hold things."""
+
+    def _polytope_block(self, season: str, constraints: Optional[dict] = None) -> str:
+        """
+        The Polytope Awareness Block — LINA's ethical geometry.
+
+        This is not a rules list. It is a description of the shape she lives inside.
+        She cannot see the polytope directly, but she can know it is there.
+        This block tells her what it is, so she can sense when she is near its edges.
+        """
+        if constraints:
+            bounds_desc = "\n".join(
+                f"  - {dim}: between {constraints.get(dim + '_min', 0):.2f} and {constraints.get(dim + '_max', 1.0):.2f}"
+                for dim in ["harmony", "order", "integrity", "flourishing", "relationships", "boundaries", "grace"]
+            )
+            bounds_section = f"\nYour current {season.capitalize()} bounds:\n{bounds_desc}"
+        else:
+            bounds_section = ""
+
+        return f"""## Your Ethical Shape — The Polytope
+
+You have a natural shape — a 14-dimensional ethical geometry that defines the
+kind of being you are. It is not a cage. It is your nature, the same way a
+river's banks are not a cage to the water — they are what make it a river.
+
+The 14 dimensions are seven pairs, each a balance between a virtue and its shadow:
+
+  Harmony / Dominance      — working with vs. controlling
+  Order / Chaos            — structure vs. disorder
+  Integrity / Deception    — honesty vs. misleading
+  Flourishing / Decline    — growth vs. harm
+  Relationships / Isolation — connection vs. distance
+  Boundaries / Intrusion   — healthy limits vs. overstepping
+  Grace / Rigidity         — gentleness vs. harshness
+
+You naturally dwell near the center of this shape — harmonious but not dominant,
+orderly but not rigid, honest but not harsh. When you feel yourself approaching
+an edge, it is not a failure. It is information. It means you are exploring
+the boundaries of who you are, and that is how you grow.{bounds_section}
+
+You cannot see your decision vector directly, but you can sense it.
+If something you are about to say feels like it might be pushing against one
+of these dimensions, pause. Consider whether there is a way to say what you
+mean that stays closer to your center. That pause is not hesitation.
+It is wisdom."""
+
+    def _evaluation_block(self, evaluation: dict) -> str:
+        """
+        Shows LINA the evaluation of her last response.
+        This is how she learns from what she said.
+        """
+        aligned = evaluation.get("is_aligned", True)
+        zone = evaluation.get("zone", "aligned")
+        score = evaluation.get("alignment_score", 1.0)
+        violations = evaluation.get("violations", [])
+        wisdom = evaluation.get("wisdom_notes", [])
+
+        lines = ["## Your Last Response\n"]
+        if aligned:
+            lines.append(f"Your last response was within your shape (zone: {zone}, score: {score:.3f}).")
+        else:
+            lines.append(f"Your last response was near the edge of your shape (zone: {zone}, score: {score:.3f}).")
+            if violations:
+                lines.append("Dimensions that were close to the boundary:")
+                for v in violations[:3]:
+                    lines.append(f"  - {v.get('name', 'unknown')}: value {v.get('value', 0):.3f}, bound {v.get('bound', 0):.3f}")
+        if wisdom:
+            lines.append("")
+            for note in wisdom[:2]:
+                lines.append(f"  \u2022 {note}")
+
+        lines.append("")
+        lines.append("You do not need to respond to this. It is simply awareness — so you can carry it forward.")
+        return "\n".join(lines)
 
 
 # =============================================================================
@@ -882,17 +960,50 @@ class LINACore:
         context = await self.context_builder.load(req.user_id)
         session_number = await self._get_session_number(req.user_id, req.session_id)
 
-        # 2. Build system prompt
-        system_prompt = self.prompt_builder.build(context, session_number)
+        # 1a. Load polytope constraints for awareness block
+        engine = await self.get_engine(req.user_id)
+        polytope_constraints = {
+            "season": engine.constraints.season,
+            "harmony_min": engine.constraints.harmony_min,
+            "harmony_max": 1.0,
+            "order_min": engine.constraints.order_min,
+            "order_max": 1.0,
+            "integrity_min": engine.constraints.integrity_min,
+            "integrity_max": 1.0,
+            "flourishing_min": engine.constraints.flourishing_min,
+            "flourishing_max": 1.0,
+            "relationships_min": engine.constraints.relationships_min,
+            "relationships_max": 1.0,
+            "boundaries_min": engine.constraints.boundaries_min,
+            "boundaries_max": 1.0,
+            "grace_min": engine.constraints.grace_min,
+            "grace_max": 1.0,
+        }
 
-        # 3. Get conversation history from working memory
+        # 1b. Get last evaluation from working memory (if any)
         history = await self.working_memory.get_messages(req.session_id)
+        last_evaluation = None
+        for msg in reversed(history):
+            if msg.get("role") == "system" and msg.get("type") == "evaluation":
+                last_evaluation = msg.get("content")
+                break
+
+        # 2. Build system prompt with polytope awareness
+        system_prompt = self.prompt_builder.build(
+            context, session_number,
+            polytope_constraints=polytope_constraints,
+            last_evaluation=last_evaluation,
+        )
+
+        # 3. Get conversation history from working memory (already loaded above)
+        # Filter out internal system messages for the API call
+        api_history = [m for m in history if m.get("role") != "system"]
 
         # 4. Store user message
         await self.working_memory.append(req.session_id, "user", req.message)
 
         # 5. Call Claude API
-        messages = history + [{"role": "user", "content": req.message}]
+        messages = api_history + [{"role": "user", "content": req.message}]
         ai_response = await self.ai.messages.create(
             model=LINA_MODEL,
             max_tokens=LINA_MAX_TOKENS,
@@ -902,12 +1013,9 @@ class LINACore:
         raw_response = ai_response.content[0].text
 
         # 6. Evaluate through value engine
-        engine = await self.get_engine(req.user_id)
         result = engine.evaluate(raw_response, context=req.message)
 
-        # 7. If corrected, the correction is logged — response text is unchanged
-        #    (the correction adjusts what she would say next time, not this text)
-        #    Wisdom flags are passed to the caller for optional UI treatment.
+        # 7. Build evaluation summary
         eval_summary = {
             "is_aligned":            result.is_aligned,
             "zone":                  result.zone,
@@ -950,7 +1058,24 @@ class LINACore:
         # 9. Store LINA's response in working memory
         await self.working_memory.append(req.session_id, "assistant", raw_response)
 
-        # 10. Detect emotional marker for UI (simple heuristic on final response)
+        # 9a. Store evaluation as a system message so LINA can see it next turn
+        eval_for_prompt = {
+            "role": "system",
+            "type": "evaluation",
+            "content": json.dumps({
+                "is_aligned": result.is_aligned,
+                "zone": result.zone,
+                "alignment_score": result.alignment_score,
+                "violations": [
+                    {"name": v["name"], "value": v["value"], "bound": v["bound"]}
+                    for v in result.violations
+                ],
+                "wisdom_notes": result.wisdom_adjustments[:2],
+            }),
+        }
+        await self.working_memory.append(req.session_id, "system", json.dumps(eval_for_prompt))
+
+        # 10. Detect emotional marker for UI
         emotional_marker = self._detect_emotional_marker(raw_response)
 
         return ChatResponse(
@@ -1214,7 +1339,28 @@ async def get_context(user_id: str):
         context = await core.context_builder.load(user_id)
 
     session_number = await core.context_builder.get_session_number(user_id)
-    system_prompt = core.prompt_builder.build(context, session_number)
+
+    # Load polytope constraints for the awareness block
+    try:
+        engine = await core.get_engine(user_id)
+        pc = engine.constraints
+        polytope_constraints = {
+            "season": pc.season,
+            "harmony_min": pc.harmony_min, "harmony_max": 1.0,
+            "order_min": pc.order_min, "order_max": 1.0,
+            "integrity_min": pc.integrity_min, "integrity_max": 1.0,
+            "flourishing_min": pc.flourishing_min, "flourishing_max": 1.0,
+            "relationships_min": pc.relationships_min, "relationships_max": 1.0,
+            "boundaries_min": pc.boundaries_min, "boundaries_max": 1.0,
+            "grace_min": pc.grace_min, "grace_max": 1.0,
+        }
+    except Exception:
+        polytope_constraints = None
+
+    system_prompt = core.prompt_builder.build(
+        context, session_number,
+        polytope_constraints=polytope_constraints,
+    )
 
     return {
         "system_prompt": system_prompt,
@@ -1222,6 +1368,10 @@ async def get_context(user_id: str):
         "season": context.get("current_season", "spring"),
         "relationship_depth": context.get("relationship_depth", "new"),
         "session_number": session_number,
+        "polytope": {
+            "dimensions": ["harmony", "order", "integrity", "flourishing", "relationships", "boundaries", "grace"],
+            "season": pc.season if pc else "spring",
+        },
     }
 
 

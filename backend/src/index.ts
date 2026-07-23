@@ -328,8 +328,8 @@ app.post('/api/upload', (req, res) => {
       continue;
     }
 
-    const normalised = path.normalize(file.relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
-    const destPath = path.resolve(WORKSPACE_PATH, 'uploads', normalised);
+    const normalised = path.normalize(file.relativePath).replace(/^(\\.\\.(\/|\\|$))+/, '');
+    const destPath = path.resolve(WORKSPACE_PATH, normalised);
 
     if (!destPath.startsWith(path.resolve(WORKSPACE_PATH))) {
       errors.push(`Blocked path traversal attempt: ${file.relativePath}`);

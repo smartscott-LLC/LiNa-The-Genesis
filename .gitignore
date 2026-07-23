@@ -9,3 +9,19 @@ coverage/
 .next/
 out/
 package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv/**
+
+# Passagemath / Sage build artifacts
+VERSION.txt
+sage.txt
+bootstrap.txt
+Makefile.txt
+
+# OS files
+thumbs.db

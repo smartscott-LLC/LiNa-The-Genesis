@@ -19,6 +19,21 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
+  evaluation?: {
+    is_aligned: boolean;
+    zone?: 'aligned' | 'acceptable_variance' | 'violation';
+    alignment_score: number;
+    was_corrected?: boolean;
+    correction_magnitude?: number;
+    season?: string;
+    violations?: Array<{ name: string; value: number; bound: number }>;
+    wisdom?: {
+      overconfidence?: boolean;
+      humility_suggested?: boolean;
+      validation_suggested?: boolean;
+      notes?: string[];
+    };
+  };
 }
 
 const EVALUATION_TELEMETRY_STORAGE_KEY = 'collabsmart_show_evaluation_telemetry';
@@ -153,13 +168,14 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
       }
     });
 
-    socket.on('chat:response', (data: { message: string }) => {
+    socket.on('chat:response', (data: { message: string; messageId?: string }) => {
+      const msgId = data.messageId || makeMsgId();
       set((state) => ({
         isAIThinking: false,
         messages: [
           ...state.messages,
           {
-            id: makeMsgId(),
+            id: msgId,
             role: 'assistant' as const,
             content: data.message,
             timestamp: new Date(),
@@ -174,30 +190,47 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
         is_aligned: boolean;
         zone?: 'aligned' | 'acceptable_variance' | 'violation';
         alignment_score: number;
-        correction_magnitude: number;
+        was_corrected?: boolean;
+        correction_magnitude?: number;
         season?: string;
         variance_margin_used?: number;
+        violations?: Array<{ name: string; value: number; bound: number }>;
+        wisdom?: {
+          overconfidence?: boolean;
+          humility_suggested?: boolean;
+          validation_suggested?: boolean;
+          notes?: string[];
+        };
       };
     }) => {
       const ev = data.evaluation;
-      const zone = ev.zone || (ev.is_aligned ? 'aligned' : 'violation');
-      const score = Number.isFinite(ev.alignment_score) ? ev.alignment_score.toFixed(3) : 'n/a';
-      const margin = typeof ev.variance_margin_used === 'number' && Number.isFinite(ev.variance_margin_used)
-        ? ev.variance_margin_used.toFixed(3)
-        : 'n/a';
-      const correction = typeof ev.correction_magnitude === 'number' && Number.isFinite(ev.correction_magnitude)
-        ? ev.correction_magnitude.toFixed(3)
-        : 'n/a';
 
-      if (!get().showEvaluationTelemetry) {
-        return;
-      }
+      // Attach evaluation to the most recent assistant message
+      set((state) => {
+        const messages = [...state.messages];
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant' && !messages[i].evaluation) {
+            messages[i] = { ...messages[i], evaluation: ev };
+            break;
+          }
+        }
 
-      addSystemLog(
-        set,
-        `LINA evaluation: zone=${zone}, score=${score}, correction=${correction}, season=${ev.season || 'n/a'}, variance_margin=${margin}`,
-        'evaluation'
-      );
+        // Only log to system log if telemetry is enabled
+        if (state.showEvaluationTelemetry) {
+          const zone = ev.zone || (ev.is_aligned ? 'aligned' : 'violation');
+          const score = Number.isFinite(ev.alignment_score) ? ev.alignment_score.toFixed(3) : 'n/a';
+          const correction = typeof ev.correction_magnitude === 'number' && Number.isFinite(ev.correction_magnitude)
+            ? ev.correction_magnitude.toFixed(3)
+            : 'n/a';
+          addSystemLog(
+            set,
+            `LINA evaluation: zone=${zone}, score=${score}, correction=${correction}, season=${ev.season || 'n/a'}`,
+            'evaluation'
+          );
+        }
+
+        return { messages };
+      });
     });
 
     socket.on('chat:error', (data: { error: string }) => {

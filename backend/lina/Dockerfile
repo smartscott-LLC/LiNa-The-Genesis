@@ -2,10 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for scipy/numpy
+# System deps for passagemath-polyhedra runtime
+# libgmp10 is the only runtime library needed — passagemath ships
+# pre-compiled manylinux wheels with all native deps bundled.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
+    libgmp10 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

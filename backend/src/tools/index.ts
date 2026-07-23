@@ -10,6 +10,24 @@ const execFileAsync = promisify(execFile);
 
 const WORKSPACE_PATH = process.env.WORKSPACE_PATH || '/workspace';
 
+/**
+ * Resolve a file path safely within the workspace.
+ * Handles both relative paths (e.g. "src/main.ts") and absolute paths
+ * within the workspace (e.g. "/workspace/src/main.ts").
+ */
+function resolveSafePath(filePath: string): string {
+  // If already an absolute path within the workspace, use it directly
+  if (path.isAbsolute(filePath)) {
+    if (!filePath.startsWith(WORKSPACE_PATH)) {
+      throw new Error('Path traversal attempt blocked');
+    }
+    return filePath;
+  }
+  // Otherwise resolve relative to workspace root, stripping leading slash
+  const cleaned = filePath.replace(/^\/+/, '');
+  return path.resolve(WORKSPACE_PATH, cleaned);
+}
+
 export interface ToolResult {
   success: boolean;
   output?: string;
@@ -67,10 +85,7 @@ export async function toolFileWrite(
   filePath: string,
   content: string
 ): Promise<ToolResult> {
-  const safePath = path.resolve(WORKSPACE_PATH, filePath.replace(/^\//, ''));
-  if (!safePath.startsWith(WORKSPACE_PATH)) {
-    return { success: false, error: 'Path traversal attempt blocked' };
-  }
+  const safePath = resolveSafePath(filePath);
   logger.info(`[tool:file_write] Writing: ${safePath}`);
   emitToolLog('file_write', `Writing ${filePath}`);
   try {
@@ -87,8 +102,10 @@ export async function toolFileWrite(
  * Read a file from the workspace.
  */
 export async function toolFileRead(filePath: string): Promise<ToolResult> {
-  const safePath = path.resolve(WORKSPACE_PATH, filePath.replace(/^\//, ''));
-  if (!safePath.startsWith(WORKSPACE_PATH)) {
+  let safePath: string;
+  try {
+    safePath = resolveSafePath(filePath);
+  } catch {
     return { success: false, error: 'Path traversal attempt blocked' };
   }
   logger.info(`[tool:file_read] Reading: ${safePath}`);
@@ -106,8 +123,10 @@ export async function toolFileRead(filePath: string): Promise<ToolResult> {
  * List files and directories in a workspace path.
  */
 export async function toolFileList(dirPath = '.'): Promise<ToolResult> {
-  const safePath = path.resolve(WORKSPACE_PATH, dirPath.replace(/^\//, ''));
-  if (!safePath.startsWith(WORKSPACE_PATH)) {
+  let safePath: string;
+  try {
+    safePath = resolveSafePath(dirPath);
+  } catch {
     return { success: false, error: 'Path traversal attempt blocked' };
   }
   emitToolLog('file_list', `Listing ${dirPath}`);
@@ -137,8 +156,10 @@ export async function toolFileSearch(
   dirPath = '.',
   fileGlob = '*',
 ): Promise<ToolResult> {
-  const safePath = path.resolve(WORKSPACE_PATH, dirPath.replace(/^\//, ''));
-  if (!safePath.startsWith(WORKSPACE_PATH)) {
+  let safePath: string;
+  try {
+    safePath = resolveSafePath(dirPath);
+  } catch {
     return { success: false, error: 'Path traversal attempt blocked' };
   }
   emitToolLog('file_search', `Searching for "${pattern}" in ${dirPath}`);
@@ -176,11 +197,13 @@ export async function toolProcessMonitor(): Promise<ToolResult> {
  * argument — preventing shell injection via crafted path names.
  */
 export async function toolLogTail(logFile: string, lines = 50): Promise<ToolResult> {
-  const safePath = path.resolve(WORKSPACE_PATH, logFile.replace(/^\//, ''));
-  if (!safePath.startsWith(WORKSPACE_PATH)) {
+  let safePath: string;
+  try {
+    safePath = resolveSafePath(logFile);
+  } catch {
     return { success: false, error: 'Path traversal attempt blocked' };
   }
-  const safeLines = Math.min(Math.max(1, Math.trunc(lines)), 1000);
+  const safeLines = Math.min(Math.max(1, Math.floor(lines)), 500);
   emitToolLog('log_tail', `Tailing ${logFile} (${safeLines} lines)`);
   try {
     const { stdout, stderr } = await execFileAsync(

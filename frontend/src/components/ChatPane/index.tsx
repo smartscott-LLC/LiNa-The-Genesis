@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useSocketStore, ChatMessage } from '../../hooks/useSocket';
+import EvaluationPanel from '../EvaluationPanel';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/models?max_price=0';
@@ -74,6 +75,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           </span>
         )}
         {msg.content}
+        {!isUser && msg.evaluation && (
+          <EvaluationPanel evaluation={msg.evaluation} />
+        )}
         <div className="text-xs opacity-40 mt-1 text-right">
           {msg.timestamp.toLocaleTimeString('en-US', { hour12: false })}
         </div>
@@ -83,7 +87,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 }
 
 export default function ChatPane() {
-  const { messages, isAIThinking, sendMessage, clearMessages, status, lastError } =
+  const { messages, isAIThinking, sendMessage, clearMessages, status, lastError, showEvaluationTelemetry, setShowEvaluationTelemetry } =
     useSocketStore();
   const [input, setInput] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -175,13 +179,26 @@ export default function ChatPane() {
           <span className="text-sm font-semibold text-sharp-text">Chat</span>
           <span className="text-xs text-gray-500">— The Softness</span>
         </div>
-        <button
-          onClick={clearMessages}
-          className="text-xs text-gray-500 hover:text-sharp-error transition-colors"
-          title="Clear conversation"
-        >
-          Clear
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowEvaluationTelemetry(!showEvaluationTelemetry)}
+            className={`text-xs px-2 py-1 rounded transition-colors ${
+              showEvaluationTelemetry
+                ? 'bg-sharp-accent/20 text-sharp-accent-light border border-sharp-accent/30'
+                : 'text-gray-500 hover:text-sharp-text border border-transparent'
+            }`}
+            title="Toggle evaluation telemetry"
+          >
+            Evals
+          </button>
+          <button
+            onClick={clearMessages}
+            className="text-xs text-gray-500 hover:text-sharp-error transition-colors"
+            title="Clear conversation"
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
