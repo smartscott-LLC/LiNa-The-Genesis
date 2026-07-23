@@ -1058,6 +1058,42 @@ class LINACore:
         # 9. Store LINA's response in working memory
         await self.working_memory.append(req.session_id, "assistant", raw_response)
 
+        # 9a. Auto-feedback: if the response was corrected, teach the encoder.
+        # In Spring, corrections are flagged but require user confirmation.
+        # In Summer+, LINA can self-correct known patterns immediately.
+        if result.was_corrected and result.correction_vector is not None:
+            try:
+                # Build the correction dimensions from violations
+                dims_to_adjust = {}
+                for v in result.violations:
+                    dim = v["dimension"]
+                    # Clamp the corrected value to what the polytope projects to
+                    dims_to_adjust[dim] = float(result.correction_vector[dim])
+
+                if dims_to_adjust:
+                    violation_names = ", ".join(v["name"] for v in result.violations[:3])
+                    pending = engine.flag_miscalibration(
+                        evaluation_id=str(uuid.uuid4()),
+                        response_text=raw_response[:200],
+                        original_vector=result.decision_vector,
+                        dimensions_to_adjust=dims_to_adjust,
+                        flagged_by="lina",
+                        reason=f"Auto-correction: {violation_names} outside polytope bounds",
+                    )
+
+                    # In Summer+, LINA can self-confirm known/repeated patterns
+                    season = engine.constraints.season
+                    if season in ("summer", "fall", "winter"):
+                        engine.confirm_correction(pending, confirmed_by="lina")
+                        log.info(
+                            f"[LINA] auto-corrected encoder for {violation_names} "
+                            f"(season={season}, magnitude={result.correction_magnitude:.4f})"
+                        )
+                    # In Spring, the pending correction is stored for user review
+                    # (the user can confirm via the /lina/feedback/confirm endpoint)
+            except Exception as e:
+                log.warning(f"[LINA] auto-feedback failed: {e}")
+
         # 9a. Store evaluation as a system message so LINA can see it next turn
         eval_for_prompt = {
             "role": "system",
