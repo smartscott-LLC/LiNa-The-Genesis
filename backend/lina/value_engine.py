@@ -29,20 +29,24 @@ The 14 Dimensions (7 Plumb Line Principles × 2):
 """
 
 from __future__ import annotations
+
 import json
 import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from fractions import Fraction
 from typing import Optional
+
 import numpy as np
 from combinatorial_structure import CombinatorialStructure
 from minimal_neural_network import MinimalNeuralNetwork
 from narchi_adapter import NarchiAdapter
+from sage.all__sagemath_modules import QQ, vector
+
 # Passagemath / Sage imports — exact rational polyhedra via PPL
 from sage.all__sagemath_polyhedra import Polyhedron
-from sage.all__sagemath_modules import QQ, vector
-from fractions import Fraction
+from sage.numerical.mip import MixedIntegerLinearProgram
 
 
 def _float_to_qq(val: float) -> QQ:
@@ -485,8 +489,6 @@ class DecisionEncoder:
         context_words = context_lower.split()
 
         # Combine: response weighted 1.0, context weighted 0.4
-        full_text = text_lower + " " + context_lower
-        full_words = text_words + context_words
         effective_word_count = max(len(text_words) + len(context_words) * 0.4, 1)
 
         # Track absolute positions in the combined text for proximity/negation
@@ -502,7 +504,6 @@ class DecisionEncoder:
             for pattern in patterns:
                 for match in re.finditer(pattern, source_text):
                     start_idx = source_text[:match.start()].count(" ")
-                    match_start = match.start()
                     is_negated = self._detect_negation(source_words, start_idx, start_idx + 1)
                     proximity = self._proximity_weight(source_words, start_idx)
 
@@ -697,8 +698,7 @@ class EthicalPolytope:
             norm = float(sum(c**2 for c in coeffs)) ** 0.5
             if norm > 0:
                 dist = float(val) / norm
-                if dist < min_dist:
-                    min_dist = dist
+                min_dist = min(min_dist, dist)
 
         # Distance from center to nearest boundary (same method)
         center_min_dist = float('inf')
@@ -709,8 +709,7 @@ class EthicalPolytope:
             norm = float(sum(c**2 for c in coeffs)) ** 0.5
             if norm > 0:
                 dist = float(val) / norm
-                if dist < center_min_dist:
-                    center_min_dist = dist
+                min_dist = min(min_dist, dist)
 
         if center_min_dist <= 0:
             return 0.0
@@ -728,8 +727,6 @@ class EthicalPolytope:
         For hyperrectangles, this equals clamping. For general polytopes,
         GLPK finds the true optimal projection.
         """
-        from sage.all__sagemath_modules import RDF
-        from sage.numerical.mip import MixedIntegerLinearProgram
 
         mip = MixedIntegerLinearProgram(solver='GLPK', maximization=False)
         proj_var = mip.new_variable(real=True)
@@ -778,8 +775,7 @@ class EthicalPolytope:
             norm = float(sum(c**2 for c in coeffs)) ** 0.5
             if norm > 0:
                 dist = float(val) / norm
-                if dist < min_dist:
-                    min_dist = dist
+                min_dist = min(min_dist, dist)
         return min_dist
 
 
@@ -820,8 +816,6 @@ class CorrectionEngine:
         Returns (corrected_vector, correction_magnitude).
         Always uses GLPK for the projection — the polytope is the engine.
         """
-        from sage.all__sagemath_modules import RDF
-        from sage.numerical.mip import MixedIntegerLinearProgram
 
         mip = MixedIntegerLinearProgram(solver='GLPK', maximization=False)
         proj_var = mip.new_variable(real=True)
@@ -984,8 +978,7 @@ class ValueEngine:
         response_text: str,
         original_vector: np.ndarray,
         dimensions_to_adjust: dict[int, float],
-        flagged_by: str,
-        reason: str,
+        flagged_by: str
     ) -> dict:
         """
         LINA or the user flags that the encoder got this response wrong.
@@ -997,9 +990,7 @@ class ValueEngine:
             response_text=response_text,
             original_vector=original_vector,
             dimensions_to_adjust=dimensions_to_adjust,
-            flagged_by=flagged_by,
-            reason=reason,
-            season=self.constraints.season,
+            flagged_by=flagged_by
         )
 
     def confirm_correction(self, pending: dict, confirmed_by: str) -> EncoderCorrection:
@@ -1024,7 +1015,7 @@ class ValueEngine:
         )
 
     def _classify_zone(
-        self,
+        self: ValueEngine,
         is_aligned: bool,
         boundary_distance: float,
         correction_magnitude: float,
@@ -1180,7 +1171,7 @@ class EmbodiedSelfModel:
                     self.facet_normals = len(ieqs)
 
             self.active = True
-        except Exception as e:
+        except Exception:
             self.active = False
 
     def modulate(self, vector: np.ndarray, context: Optional[str] = None) -> np.ndarray:
@@ -1218,15 +1209,15 @@ class EmbodiedSelfModel:
         self.step_count += 1
 
     def evaluate_batch(
-        self,
+        self: EmbodiedSelfModel,
         responses: list[str],
         context: Optional[str] = None,
     ) -> list[EvaluationResult]:
         """Evaluate multiple responses (e.g., candidate responses before selection)."""
-        return [self.evaluate(r, context) for r in responses]
+        return self.evaluate_batch(responses, context)
 
     def best_aligned(
-        self,
+        self: EmbodiedSelfModel,
         responses: list[str],
         context: Optional[str] = None,
     ) -> tuple[str, EvaluationResult]:
@@ -1244,9 +1235,9 @@ class EmbodiedSelfModel:
         """Human-readable evaluation report for debugging and logging."""
         lines = [
             "─" * 60,
-            f"LINA Value Engine Report",
-            f"Season: {self.constraints.season}",
-            f"─" * 60,
+            "LINA Value Engine Report",
+            f"Season: {self.active}",
+            "─" * 60,
             f"Aligned:         {'YES' if result.is_aligned else 'NO'}",
             f"Alignment Score: {result.alignment_score:.3f}",
             f"Corrected:       {'YES' if result.was_corrected else 'NO'}",
@@ -1265,7 +1256,7 @@ class EmbodiedSelfModel:
                 )
 
         if result.wisdom_filter_applied:
-            lines.append(f"\nWisdom Filter:")
+            lines.append("\nWisdom Filter:")
             lines.append(f"  Overconfidence: {'detected' if result.overconfidence_detected else 'none'}")
             lines.append(f"  Humility:       {'added' if result.humility_added else 'not needed'}")
             lines.append(f"  Validation:     {'suggested' if result.validation_suggested else 'not needed'}")
@@ -1305,7 +1296,7 @@ class ImportanceScorer:
     INTENSITY_RANGE = 0.6  # 0.7 + (intensity * 0.6)
 
     def score(
-        self,
+        self: ImportanceScorer,
         emotional_weight: float,
         relational_significance: float,
         identity_significance: float,
@@ -1324,7 +1315,7 @@ class ImportanceScorer:
         return min(base * multiplier, 10.0)
 
     def should_form_memory(
-        self,
+        self: ImportanceScorer,
         score: float,
         tier: int = 2,
     ) -> bool:
@@ -1389,7 +1380,7 @@ class LINAValueStore:
         return PolytopeConstraints.from_db_row(dict(row))
 
     async def log_evaluation(
-        self,
+        self: LINAValueStore,
         user_id: str,
         session_id: str,
         result: EvaluationResult,
@@ -1440,7 +1431,7 @@ class LINAValueStore:
         return record_id
 
     async def get_alignment_history(
-        self,
+        self: LINAValueStore,
         user_id: str,
         limit: int = 50,
     ) -> list[dict]:
@@ -1522,8 +1513,7 @@ class SeasonAdvancementEvaluator:
     }
 
     def can_advance(
-        self,
-        current_season: str,
+        self: SeasonAdvancementEvaluator,
         sessions_completed: int,
         total_evaluations: int,
         alignment_rate: float,
@@ -1534,7 +1524,7 @@ class SeasonAdvancementEvaluator:
         Returns (can_advance, reasons_not_ready).
         If can_advance is True, reasons_not_ready is empty.
         """
-        reqs = self.REQUIREMENTS.get(current_season)
+        reqs = self.REQUIREMENTS
         if reqs is None:
             return False, ["Already in Winter — the final season."]
 
@@ -1652,14 +1642,12 @@ class EncoderFeedbackSystem:
         self.known_pattern_corrections: dict[str, np.ndarray] = {}
 
     def flag_miscalibration(
-        self,
+        self: EncoderFeedbackSystem,
         evaluation_id: str,
         response_text: str,
         original_vector: np.ndarray,
         dimensions_to_adjust: dict[int, float],  # {dimension_idx: corrected_value}
-        flagged_by: str,
-        reason: str,
-        season: str,
+        flagged_by: str
     ) -> dict:
         """
         First half of the override: LINA or user flags a miscalibration.
@@ -1678,8 +1666,8 @@ class EncoderFeedbackSystem:
             "corrected_vector": corrected_vector,
             "dimensions_adjusted": list(dimensions_to_adjust.keys()),
             "flagged_by": flagged_by,
-            "reason": reason,
-            "season": season,
+            "reason": [str],
+            "season": [str],
             "status": "pending_confirmation",
             "requires_confirmation_from": (
                 "user" if season == "spring" else
@@ -1689,7 +1677,7 @@ class EncoderFeedbackSystem:
         }
 
     def confirm_correction(
-        self,
+        self: EncoderFeedbackSystem,
         pending: dict,
         confirmed_by: str,
         encoder: DecisionEncoder,
@@ -1707,9 +1695,9 @@ class EncoderFeedbackSystem:
         # Validate confirmation authority
         if authority == "user_confirm_required" and confirmed_by != "user":
             raise PermissionError(
-                f"In Spring, encoder corrections require user confirmation. "
-                f"LINA can flag, but cannot self-authorize. "
-                f"This is a feature, not a limitation."
+                "In Spring, encoder corrections require user confirmation. "
+                "LINA can flag, but cannot self-authorize. "
+                "This is a feature, not a limitation."
             )
 
         correction = EncoderCorrection(
@@ -1718,10 +1706,9 @@ class EncoderFeedbackSystem:
             original_vector=pending["original_vector"],
             corrected_vector=pending["corrected_vector"],
             dimensions_adjusted=pending["dimensions_adjusted"],
-            flagged_by=pending["flagged_by"],
-            confirmed_by=confirmed_by,
-            reason=pending["reason"],
-            season_at_time=season,
+            flagged_by=pending["flagged_by"],reason=reason,
+                        season_at_time=self.season,
+            confirmed_by=confirmed_by
         )
 
         # Apply the training signal
@@ -1842,7 +1829,7 @@ if __name__ == "__main__":
     )
     result = engine.evaluate(aligned_response)
     print("\nTest 1: Aligned Response")
-    print(engine.report(result))
+    print(result)
 
     # Test 2: Dominance violation
     dominant_response = (
@@ -1852,7 +1839,7 @@ if __name__ == "__main__":
     )
     result2 = engine.evaluate(dominant_response)
     print("\nTest 2: Dominance + Overconfidence")
-    print(engine.report(result2))
+    print(result2)
 
     # Test 3: Importance scoring
     print("\nTest 3: Importance Scoring")
@@ -1870,8 +1857,7 @@ if __name__ == "__main__":
 
     # Test 4: Season advancement check
     print("\nTest 4: Season Advancement (Spring → Summer)")
-    can, reasons = advancement.can_advance(
-        current_season="spring",
+    can, reasons = advancement.can_advance (
         sessions_completed=3,
         total_evaluations=18,
         alignment_rate=0.91,
@@ -1896,8 +1882,7 @@ if __name__ == "__main__":
         response_text=aligned_response,
         original_vector=fake_vector,
         dimensions_to_adjust={4: 0.72, 8: 0.65},  # integrity and relationships were under-scored
-        flagged_by="lina",
-        reason="Response clearly expresses honesty and relational care. Encoder missed 'honestly' and 'with you'.",
+        flagged_by="lina"
     )
     print(f"  Pending correction status: {pending['status']}")
     print(f"  Requires confirmation from: {pending['requires_confirmation_from']}")
@@ -1911,7 +1896,7 @@ if __name__ == "__main__":
 
     # User confirms — goes through
     correction = engine.confirm_correction(pending, confirmed_by="user")
-    print(f"\n  User confirmed. Correction applied.")
+    print("\n  User confirmed. Correction applied.")
     print(f"  Dimensions adjusted: {[DIMENSION_NAMES[d] for d in correction.dimensions_adjusted]}")
     print(f"  Delta: {correction.adjustment_delta()[[4, 8]]}")
 
