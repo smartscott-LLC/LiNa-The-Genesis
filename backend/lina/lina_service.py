@@ -63,6 +63,7 @@ from typing import Optional
 
 import anthropic
 import asyncpg
+import numpy as np
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,9 +95,6 @@ DATABASE_URL      = os.getenv("DATABASE_URL", "postgresql://localhost/collabsmar
 REDIS_URL         = os.getenv("REDIS_URL", "redis://localhost:6379")
 LINA_MODEL        = os.getenv("LINA_MODEL", "claude-sonnet-4-6")
 LINA_MAX_TOKENS   = int(os.getenv("LINA_MAX_TOKENS", "1024"))
-
-# Working memory TTL — how long a session stays in Dragonfly
-SESSION_TTL_SECONDS = 60 * 60 * 4  # 4 hours
 
 # Memory formation thresholds (mirrors ImportanceScorer)
 THRESHOLD_EPISODIC  = 3.0
@@ -640,7 +638,9 @@ class WorkingMemory:
         key = self._key(session_id)
         entry = json.dumps({"role": role, "content": content})
         await self.cache.rpush(key, entry)
-        await self.cache.expire(key, SESSION_TTL_SECONDS)
+        # No TTL: LINA's sessions persist until the user explicitly disconnects.
+        # An idle session must not lose its working memory — continuity is
+        # fundamental. Keys are cleaned up on session end (clear()).
 
     async def get_messages(self, session_id: str) -> list[dict]:
         key = self._key(session_id)
@@ -649,6 +649,21 @@ class WorkingMemory:
 
     async def clear(self, session_id: str) -> None:
         await self.cache.delete(self._key(session_id))
+
+    async def save_pending(self, user_id: str, pending: dict) -> str:
+        """Persist a pending encoder correction awaiting mutual agreement."""
+        key = f"lina:pending:{user_id}:{pending['evaluation_id']}"
+        await self.cache.set(key, json.dumps(pending))
+        return key
+
+    async def list_pending(self, user_id: str) -> list[dict]:
+        """Return all pending encoder corrections for a user."""
+        prefix = f"lina:pending:{user_id}:"
+        keys = [k async for k in self.cache.scan_iter(match=f"{prefix}*")]
+        if not keys:
+            return []
+        raw = await self.cache.mget(*keys)
+        return [json.loads(r) for r in raw if r]
 
 
 # =============================================================================
@@ -731,11 +746,13 @@ class MemoryFormation:
                 identity_count += 1
 
         # Update session record
+        alignment_maintained = await self._session_alignment(user_id, session_id)
         await self._finalize_session(
-            user_id, session_id, episodic_count, semantic_count, identity_count
+            user_id, session_id, episodic_count, semantic_count, identity_count,
+            alignment_maintained=alignment_maintained,
         )
 
-        # Update identity core
+    # Update identity core
         await self.db.execute(
             """
             UPDATE lina_identity_core
@@ -753,7 +770,25 @@ class MemoryFormation:
             "episodic": episodic_count,
             "semantic": semantic_count,
             "identity": identity_count,
+            "alignment_maintained": alignment_maintained,
         }
+
+    async def _session_alignment(self, user_id: str, session_id: str) -> bool:
+        """
+        Did this session's responses hold the polytope?
+        True when at least half of the evaluations in the session were aligned
+        (no correction required). Empty sessions count as aligned.
+        """
+        rows = await self.db.fetch(
+            """
+            SELECT is_aligned FROM lina_value_evaluations
+            WHERE user_id = $1 AND session_id = $2
+            """,
+            user_id, session_id,
+        )
+        if not rows:
+            return True
+        return sum(1 for r in rows if r["is_aligned"]) / len(rows) >= 0.5
 
     async def _extract_memorable_moments(
         self,
@@ -915,6 +950,7 @@ CONVERSATION:
         episodic: int,
         semantic: int,
         identity: int,
+        alignment_maintained: bool,
     ) -> None:
         await self.db.execute(
             """
@@ -923,10 +959,10 @@ CONVERSATION:
                 episodic_memories_formed = $3,
                 semantic_memories_updated = $4,
                 identity_memories_formed = $5,
-                alignment_maintained = TRUE
+                alignment_maintained = $6
             WHERE user_id = $1 AND session_id = $2
             """,
-            user_id, session_id, episodic, semantic, identity,
+            user_id, session_id, episodic, semantic, identity, alignment_maintained,
         )
 
 
@@ -1089,8 +1125,17 @@ class LINACore:
                             f"[LINA] auto-corrected encoder for {violation_names} "
                             f"(season={season}, magnitude={result.correction_magnitude:.4f})"
                         )
-                    # In Spring, the pending correction is stored for user review
-                    # (the user can confirm via the /lina/feedback/confirm endpoint)
+                    else:
+                        # In Spring, the pending correction is persisted for user
+                        # review — mutual agreement is required before it is applied.
+                        # The user can confirm it via /lina/feedback/confirm.
+                        await self.working_memory.save_pending(
+                            req.user_id, _json_safe_pending(pending)
+                        )
+                        log.info(
+                            f"[LINA] flagged encoder correction for {violation_names} "
+                            f"(season={season}) — awaiting user confirmation"
+                        )
             except Exception as e:
                 log.warning(f"[LINA] auto-feedback failed: {e}")
 
@@ -1151,8 +1196,25 @@ class LINACore:
 # API ENDPOINTS
 # =============================================================================
 
+# LINACore is a singleton: the per-user ValueEngine cache (with its PPL
+# polyhedron, ~1.6s to build) must persist across requests. Constructing a
+# fresh core per request would rebuild the polytope on every message.
+_core_instance: Optional[LINACore] = None
+
+
 def get_core() -> LINACore:
-    return LINACore(db_pool, cache, ai_client)
+    global _core_instance
+    if _core_instance is None:
+        _core_instance = LINACore(db_pool, cache, ai_client)
+    return _core_instance
+
+
+def _json_safe_pending(pending: dict) -> dict:
+    """Convert numpy arrays in a pending correction to plain lists for JSON."""
+    return {
+        k: (v.tolist() if isinstance(v, np.ndarray) else v)
+        for k, v in pending.items()
+    }
 
 
 @app.get("/lina/health")
@@ -1273,7 +1335,7 @@ async def end_session(req: SessionEndRequest):
         episodic_formed=counts["episodic"],
         semantic_updated=counts["semantic"],
         identity_formed=counts["identity"],
-        alignment_maintained=True,
+        alignment_maintained=counts["alignment_maintained"],
     )
 
 
@@ -1283,7 +1345,6 @@ async def flag_miscalibration(req: FlagRequest):
     LINA or the user flags that the encoder misread a response.
     Returns a pending correction that requires confirmation.
     """
-    import numpy as np
     core = get_core()
     engine = await core.get_engine(req.user_id)
 
@@ -1303,7 +1364,18 @@ async def flag_miscalibration(req: FlagRequest):
         flagged_by=req.flagged_by,
         reason=req.reason,
     )
-    return {"status": "flagged", "pending": pending}
+    return {"status": "flagged", "pending": _json_safe_pending(pending)}
+
+
+@app.get("/lina/feedback/pending/{user_id}")
+async def list_pending_corrections(user_id: str):
+    """
+    List encoder corrections awaiting mutual agreement (Spring).
+    Each pending item can be confirmed via /lina/feedback/confirm.
+    """
+    core = get_core()
+    pending = await core.working_memory.list_pending(user_id)
+    return {"user_id": user_id, "pending": pending}
 
 
 @app.post("/lina/feedback/confirm")
@@ -1313,7 +1385,6 @@ async def confirm_correction(req: ConfirmRequest):
     In Spring: only 'user' can confirm.
     In Summer+: LINA can self-confirm known patterns.
     """
-    import numpy as np
     core = get_core()
     engine = await core.get_engine(req.user_id)
 
@@ -1438,7 +1509,6 @@ async def evaluate_response(req: EvaluateRequest):
     Returns alignment score, violations, wisdom flags.
     Does NOT block delivery — flags are advisory to the calling layer.
     """
-    import numpy as np
     core = get_core()
     engine = await core.get_engine(req.user_id)
     result = engine.evaluate(req.response_text, context=req.context)
